@@ -14,7 +14,7 @@
 // constant macros
 #define BAUD_RATE                   115200      // (bits/second)          serial buffer baud rate
 #define BUFF_SIZE                   64          // (bytes)                maximum message size
-#define MSG_TIMEOUT                 1000        // (milliseconds)         timeout from last character received
+#define MSG_TIMEOUT                 10000       // (milliseconds)         timeout from last character received
 #define NUM_CMDS                    6           // (positive integer)     number of commands in the command table struct
 
 #define NUM_BOXES                   2
@@ -40,12 +40,12 @@ unsigned long lastCharTime;       // used to timeout a message that is cut off o
 // LED global variables
 uint8_t brightnessVal = 1;        // default brightness for boxes (can be adjusted with LED_RGB)
 
-// RTC box 1 global variables
+// RTC global variables
 bool prevIsDay[NUM_BOXES] = {false, false};     // keep track of the last check for comparison to next check
 bool startCheck[NUM_BOXES] = {false, false};    // user defined start variable for checking day and night cycles
 bool firstCheck[NUM_BOXES] = {true, true};      // some things only need to be done on the first iteration
-uint8_t dayStart[NUM_BOXES] = {8, 8};           // user defined day time start (white light)
-uint8_t dayStop[NUM_BOXES] = {18, 18};          // uesr defined night time start (red light)
+int dayStart[NUM_BOXES] = {480, 480};           // user defined day time start (white light)
+int dayStop[NUM_BOXES] = {1080, 1080};          // uesr defined night time start (red light)
 
 // custom data type that is a pointer to a command function
 typedef void (*CmdFunc)(int argc, char* argv[]);
@@ -201,7 +201,7 @@ void receive_message(void) {
       // ignore message and reset index if we exceed timeout
       if ((millis() - lastCharTime) > MSG_TIMEOUT) {
         idx = 0;
-        Serial.println("SYS: Message timeout...");
+        Serial.println("SYS: message timeout");
       }
   }
 
@@ -294,10 +294,10 @@ void update_day_night(int box) {
 
   // get the current time
   DateTime now = rtc.now();
-  int currentHour = now.hour();
+  int currentMinute = now.hour() * 60 + now.minute();
 
   // determine if it's day or night
-  bool isDay = (currentHour >= dayStart[box] && currentHour < dayStop[box]);
+  bool isDay = (currentMinute >= dayStart[box] && currentMinute < dayStop[box]);
 
   // only prompt user if we changed from the last day check
   if (firstCheck[box] || isDay != prevIsDay[box]) {
@@ -345,6 +345,25 @@ void echo_command_args(int argc, char* argv[]) {
 
 }
 
+// splits the time format "HH:MM" into "HH" and "MM"
+void split_time(const char* inputTime, char* hours, char* minutes) {
+
+  // validate the input format
+  if (strlen(inputTime) != 5 || inputTime[2] != ':') {
+    // invalid input format
+    strcpy(hours, "00");
+    strcpy(minutes, "00");
+    return;
+  }
+
+  // extract hours and minutes
+  strncpy(hours, inputTime, 2);
+  hours[2] = '\0'; // null terminate
+  strncpy(minutes, inputTime + 3, 2);
+  minutes[2] = '\0'; // null terminate
+
+}
+
 
 
 /******************************************************************************************
@@ -381,17 +400,35 @@ void Command_RTC_ON(int argc, char* argv[]) {
   // select which box
   int box = atoi(argv[1]);
 
-  // get the day time arguments from the user
-  dayStart[box] = atoi(argv[2]);
-  dayStop[box] = atoi(argv[3]);
+  // get the time arguments from the user (HH:MM)
+  char* startStr = argv[2];
+  char* stopStr = argv[3];
+
+  // split the start time into hours and minutes
+  char startHours[3];
+  char startMinutes[3];
+  split_time(startStr, startHours, startMinutes);
+
+  // split the stop time into hours and minutes
+  char stopHours[3];
+  char stopMinutes[3];
+  split_time(stopStr, stopHours, stopMinutes);
+
+  // convert hours and minutes to total minutes integer
+  dayStart[box] = atoi(startHours) * 60 + atoi(startMinutes);
+  dayStop[box] = atoi(stopHours) * 60 + atoi(stopMinutes);
 
   // ack the start and stop times
   Serial.print("RTC: setting day and night times for box ");
   Serial.println(box);
-  Serial.print("RTC: white LED (day) starts at hour ");
-  Serial.println(dayStart[box]);
-  Serial.print("RTC: red LED (night) starts at hour ");
-  Serial.println(dayStop[box]);
+  Serial.print("RTC: white LED (day) starts at ");
+  Serial.print(startHours);
+  Serial.print(":");
+  Serial.println(startMinutes);
+  Serial.print("RTC: red LED (night) starts at ");
+  Serial.print(stopHours);
+  Serial.print(":");
+  Serial.println(stopMinutes);
 
   // tell the main loop to start checking the time
   startCheck[box] = true;
