@@ -1,15 +1,10 @@
 // TODO
-// - Make sure the manual LED controls interface correctly with the automatic ones
-// - Desolder RESET-EN
-// - Create a GUI for easy use with LabView
-// - Debug redirects outputs to text file
-// - Control two different LED strips
-// - Execute commands based on argc and argv not the structure
 
 #include <FastLED.h>
 #include <RTClib.h>
 #include <Wire.h>
-#include <EEPROM.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
 
 // constant macros
 #define BAUD_RATE                   115200      // (bits/second)          serial buffer baud rate
@@ -18,6 +13,8 @@
 #define NUM_CMDS                    6           // (positive integer)     number of commands in the command table struct
 
 #define NUM_BOXES                   2
+#define DHT_PIN_1                   3
+#define DHT_PIN_2                   4
 #define LED_PIN_1                   5
 #define LED_PIN_2                   6
 #define NUM_LEDS                    1
@@ -25,27 +22,26 @@
 #define COLOR_ORDER                 GRB
 #define UPDATES_PER_SECOND          100
 
-// constant variables
 const char* DAYS_OF_THE_WEEK[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
-// memory block storage locations
-uint8_t buff[BUFF_SIZE];          // message buffer
-CRGB leds[NUM_BOXES][NUM_LEDS];   // LED manipulation for booths
-RTC_PCF8523 rtc;                  // define the RTC object
-
 // general global variables
-bool debugMode = false;           // print serial output to text file (defective)
-unsigned long lastCharTime;       // used to timeout a message that is cut off or too slow
-
-// LED global variables
-uint8_t brightnessVal = 1;        // default brightness for boxes (can be adjusted with LED_RGB)
+RTC_PCF8523 rtc;                                                  // define the RTC object
+CRGB leds[NUM_BOXES][NUM_LEDS];                                   // LED manipulation for booths
+DHT dhtSensors[NUM_BOXES] = {                                     // DHT climate sensors
+  DHT(DHT_PIN_1, DHT11),                                          // box 1
+  DHT(DHT_PIN_2, DHT11)                                           // box 2
+};
+uint8_t buff[BUFF_SIZE];                                          // message buffer
+bool debugMode = false;                                           // print serial output to text file (defective)
+unsigned long lastCharTime;                                       // used to timeout a message that is cut off or too slow
+uint8_t brightnessVal = 1;                                        // default brightness for boxes (can be adjusted with LED_INT)
 
 // RTC global variables
-bool prevIsDay[NUM_BOXES] = {false, false};     // keep track of the last check for comparison to next check
-bool startCheck[NUM_BOXES] = {false, false};    // user defined start variable for checking day and night cycles
-bool firstCheck[NUM_BOXES] = {true, true};      // some things only need to be done on the first iteration
-int dayStart[NUM_BOXES] = {480, 480};           // user defined day time start (white light)
-int dayStop[NUM_BOXES] = {1080, 1080};          // uesr defined night time start (red light)
+bool prevIsDay[NUM_BOXES] = {false, false};                       // keep track of the last check for comparison to next check
+bool startCheck[NUM_BOXES] = {false, false};                      // user defined start variable for checking day and night cycles
+bool firstCheck[NUM_BOXES] = {true, true};                        // some things only need to be done on the first iteration
+int dayStart[NUM_BOXES] = {480, 480};                             // user defined day time start (white light)
+int dayStop[NUM_BOXES] = {1080, 1080};                            // uesr defined night time start (red light)
 
 // custom data type that is a pointer to a command function
 typedef void (*CmdFunc)(int argc, char* argv[]);
@@ -121,8 +117,14 @@ void setup(void) {
   // start up serial buffer and flush it
   Serial.begin(BAUD_RATE);
   while (Serial.available() > 0) {Serial.read();}
-  Serial.println("*********BEGIN SETUP*********");
-  
+  Serial.flush();
+  Serial.println("*********BEGIN SETUP*********");  
+
+  // setup DHT climate sensors
+  for (int i = 0; i < NUM_BOXES; ++i) {
+    dhtSensors[i].begin();
+  }
+
   // setup the WS2812B LED strips
   FastLED.addLeds<LED_TYPE, LED_PIN_1, COLOR_ORDER>(leds[0], NUM_LEDS);
   FastLED.addLeds<LED_TYPE, LED_PIN_2, COLOR_ORDER>(leds[1], NUM_LEDS);
@@ -176,6 +178,32 @@ void loop(void) {
   for (int box = 0; box < NUM_BOXES; ++box) {
     if (startCheck[box]) {
       update_day_night(box);
+    }
+  }
+
+  // keep track of the iteration
+  static unsigned int cycleCounter = 0;
+  ++cycleCounter;
+
+  // read climate sensors every 256th iteration
+  if (cycleCounter == 0) {
+    for (int i = 0; i < NUM_BOXES; ++i) {
+      // store the readings
+      float temperature = dhtSensors[i].readTemperature();
+      float humidity = dhtSensors[i].readHumidity();
+      // send the readings to derial if valid
+      if (isnan(temperature) || isnan(humidity)) {
+        Serial.print("DHT");
+        Serial.print(i + 1);
+        Serial.println(": N/A");
+      } else {
+        Serial.print("DHT");
+        Serial.print(i + 1);
+        Serial.print(": T=");
+        Serial.print(temperature);
+        Serial.print(" H=");
+        Serial.println(humidity);
+      }
     }
   }
 
@@ -345,12 +373,11 @@ void echo_command_args(int argc, char* argv[]) {
 
 }
 
-// splits the time format "HH:MM" into "HH" and "MM"
+// splits the time format "HHMM" into "HH" and "MM"
 void split_time(const char* inputTime, char* hours, char* minutes) {
 
   // validate the input format
-  if (strlen(inputTime) != 5 || inputTime[2] != ':') {
-    // invalid input format
+  if (strlen(inputTime) != 4) {
     strcpy(hours, "00");
     strcpy(minutes, "00");
     return;
@@ -359,7 +386,7 @@ void split_time(const char* inputTime, char* hours, char* minutes) {
   // extract hours and minutes
   strncpy(hours, inputTime, 2);
   hours[2] = '\0'; // null terminate
-  strncpy(minutes, inputTime + 3, 2);
+  strncpy(minutes, inputTime + 2, 2);
   minutes[2] = '\0'; // null terminate
 
 }
@@ -420,7 +447,7 @@ void Command_RTC_ON(int argc, char* argv[]) {
 
   // ack the start and stop times
   Serial.print("RTC: setting day and night times for box ");
-  Serial.println(box);
+  Serial.println(box + 1);
   Serial.print("RTC: white LED (day) starts at ");
   Serial.print(startHours);
   Serial.print(":");
@@ -454,7 +481,7 @@ void Command_RTC_OFF(int argc, char* argv[]) {
 
   // prompt the user
   Serial.print("RTC: turned off day and night cycles for box ");
-  Serial.println(box);
+  Serial.println(box + 1);
 
 }
 
@@ -479,7 +506,7 @@ void Command_LED_RGB(int argc, char* argv[]) {
 
   // prompt the user
   Serial.print("LED: strip ");
-  Serial.print(box);
+  Serial.print(box + 1);
   Serial.print(" color set to RGB values (");
   Serial.print(R);
   Serial.print(", ");
@@ -522,6 +549,6 @@ void Command_LED_OFF(int argc, char* argv[]) {
 
   // prompt the user
   Serial.print("LED: turned off strip ");
-  Serial.println(box);
+  Serial.println(box + 1);
 
 }
