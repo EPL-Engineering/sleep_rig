@@ -10,7 +10,7 @@
 #define BAUD_RATE                   115200      // (bits/second)          serial buffer baud rate
 #define BUFF_SIZE                   64          // (bytes)                maximum message size
 #define MSG_TIMEOUT                 10000       // (milliseconds)         timeout from last character received
-#define NUM_CMDS                    6           // (positive integer)     number of commands in the command table struct
+#define NUM_CMDS                    7           // (positive integer)     number of commands in the command table struct
 
 #define NUM_BOXES                   2
 #define DHT_PIN_1                   3
@@ -59,6 +59,7 @@ void Command_RTC_OFF(int argc = 0, char* argv[] = {NULL});
 void Command_LED_RGB(int argc = 0, char* argv[] = {NULL});
 void Command_LED_INT(int argc = 0, char* argv[] = {NULL});
 void Command_LED_OFF(int argc = 0, char* argv[] = {NULL});
+void Command_DHT_GET(int argc = 0, char* argv[] = {NULL});
 
 // command table
 CmdStruct cmdTable[NUM_CMDS] = {
@@ -97,6 +98,12 @@ CmdStruct cmdTable[NUM_CMDS] = {
     .commandArgs = 2,                         // LED_OFF <boxNum>
     .commandString = "LED_OFF",               // capitalized command for turning the LED off
     .commandFunction = &Command_LED_OFF       // run Command_LED_OFF
+  },
+  
+  {
+    .commandArgs = 1,                         // DHT_GET
+    .commandString = "DHT_GET",               // capitalized command for getting climate readings
+    .commandFunction = &Command_DHT_GET       // run Command_DHT_GET
   }
 
 };
@@ -178,32 +185,6 @@ void loop(void) {
   for (int box = 0; box < NUM_BOXES; ++box) {
     if (startCheck[box]) {
       update_day_night(box);
-    }
-  }
-
-  // keep track of the iteration
-  static unsigned int cycleCounter = 0;
-  ++cycleCounter;
-
-  // read climate sensors every 256th iteration
-  if (cycleCounter == 0) {
-    for (int i = 0; i < NUM_BOXES; ++i) {
-      // store the readings
-      float temperature = dhtSensors[i].readTemperature();
-      float humidity = dhtSensors[i].readHumidity();
-      // send the readings to derial if valid
-      if (isnan(temperature) || isnan(humidity)) {
-        Serial.print("DHT");
-        Serial.print(i + 1);
-        Serial.println(": N/A");
-      } else {
-        Serial.print("DHT");
-        Serial.print(i + 1);
-        Serial.print(": T=");
-        Serial.print(temperature);
-        Serial.print(" H=");
-        Serial.println(humidity);
-      }
     }
   }
 
@@ -550,5 +531,29 @@ void Command_LED_OFF(int argc, char* argv[]) {
   // prompt the user
   Serial.print("LED: turned off strip ");
   Serial.println(box + 1);
+
+}
+
+// command function to get the climate readings for both boxes
+void Command_DHT_GET(int argc, char* argv[]) {
+
+    for (int i = 0; i < NUM_BOXES; ++i) {
+      // store the readings
+      float temperature = dhtSensors[i].readTemperature();
+      float humidity = dhtSensors[i].readHumidity();
+      // send the readings to derial if valid
+      if (isnan(temperature) || isnan(humidity)) {
+        Serial.print("DHT");
+        Serial.print(i + 1);
+        Serial.println(": N/A");
+      } else {
+        Serial.print("DHT");
+        Serial.print(i + 1);
+        Serial.print(": T=");
+        Serial.print(temperature);
+        Serial.print(" H=");
+        Serial.println(humidity);
+      }
+    }
 
 }
