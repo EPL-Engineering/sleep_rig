@@ -18,7 +18,7 @@
 #define LED_PIN_2 6
 
 #define NUM_BOXES 2
-#define NUM_LEDS 1
+#define NUM_LEDS 26
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
 #define UPDATES_PER_SECOND 100
@@ -143,8 +143,7 @@ void setup(void) {
   // initialize the RTC
   if (!rtc.begin()) {
     if (debugMode) Serial.println("RTC: couldn't initialize module... please restart!");
-    while (true)
-      ;
+    while (true);
   } else {
     if (debugMode) Serial.println("RTC: initialized successfully");
   }
