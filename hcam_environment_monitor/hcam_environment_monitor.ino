@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <stdio.h>
+#include <string.h>
 
 // constant macros
 #define BAUD_RATE 9600    // (bits/second)          serial buffer baud rate
@@ -26,7 +28,6 @@
 RTC_PCF8523 rtc;                 // define the RTC object
 CRGB leds[NUM_BOXES][NUM_LEDS];  // LED manipulation for booths
 uint8_t buff[BUFF_SIZE];         // message read buffer
-bool debugMode = false;          // print serial output for debugging
 unsigned long lastCharTime;      // used to timeout a message that is cut off or too slow
 uint8_t brightnessVal = 1;       // default brightness for boxes (can be adjusted with LED_INT)
 DHT dhtSensors[NUM_BOXES] = {
@@ -99,6 +100,19 @@ CmdStruct cmdTable[NUM_CMDS] = {
 
 };
 
+// struct to send sensor data packet over serial
+typedef struct {
+  char date[11];
+  char time[9];
+  uint8_t r1, g1, b1;  // RGB values for LED 1
+  uint8_t r2, g2, b2;  // RGB values for LED 2
+  float temp1;
+  float temp2;
+  float hum1;
+  float hum2;
+  char cmdName[22];
+} SensorData;
+
 
 
 /******************************************************************************************
@@ -116,7 +130,6 @@ void setup(void) {
   Serial.begin(BAUD_RATE);
   while (Serial.available() > 0) { Serial.read(); }
   Serial.flush();
-  if (debugMode) Serial.println("*********BEGIN SETUP*********");
 
   // setup DHT climate sensors
   dhtSensors[0].begin();  // box 1
@@ -138,33 +151,18 @@ void setup(void) {
 
   // update all of those changes
   FastLED.show();
-  if (debugMode) Serial.println("LED: initialized successfully");
 
   // initialize the RTC
-  if (!rtc.begin()) {
-    if (debugMode) Serial.println("RTC: couldn't initialize module... please restart!");
-    while (true);
-  } else {
-    if (debugMode) Serial.println("RTC: initialized successfully");
-  }
+  if (!rtc.begin()) while (true);
 
   // check if the RTC lost power
   if (!rtc.initialized() || rtc.lostPower()) {
-    if (debugMode) Serial.println("RTC: uninitialized, setting the date and time...");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
-
-  // when the RTC was stopped and stays connected to the battery, it has
-  // to be restarted by clearing the STOP bit. Let's do this to ensure
-  // the RTC is running
+  // ensure rtc is running by clearing the stop bit (stayed connected to battery but stopped)
   rtc.start();
 
-  // separate commands with new line
-  if (debugMode) Serial.println("**********END SETUP**********");
-
-  // first log entry on serial connect
-  Command_LOG_REQ();
-  Serial.println("CONNECT");
+  write_log("SER_CON");
 }
 
 void loop(void) {
@@ -203,7 +201,6 @@ void receive_message(void) {
     // ignore message and reset index if we exceed timeout
     if ((millis() - lastCharTime) > MSG_TIMEOUT) {
       idx = 0;
-      if (debugMode) Serial.println("SYS: message timeout");
     }
   }
 
@@ -256,11 +253,6 @@ void process_message(void) {
           token = strtok(NULL, " ");
           // check if there is too few arguments
           if (token == NULL) {
-            if (debugMode) {
-              Serial.print("SYS: not enough args for '");
-              Serial.print(argv[0]);
-              Serial.println("'");
-            }
             return;
           }
           // store if it's provided
@@ -270,28 +262,19 @@ void process_message(void) {
         token = strtok(NULL, " ");
         // check if there is too many arguments
         if (token != NULL) {
-          if (debugMode) {
-            Serial.print("SYS: too many args for '");
-            Serial.print(argv[0]);
-            Serial.println("'");
-          }
           return;
         }
         // execute the command and pass any arguments
         cmdTable[i].commandFunction(argc, argv);
-        // make sure we echo the command if manual log entry (this gives us a new line too)
-        if (i == 0) echo_command_args(argc, argv);
+        // convert the command and arguments to string
+        char cmdName[22];
+        strcpy(cmdName, echo_command_args(argc, argv));
+        // write log to serial line
+        write_log(cmdName);
         // ok get out of here now
         return;
       }
     }
-  }
-
-  // send user response if we did not find a match in the command table
-  if (debugMode) {
-    Serial.print("SYS: unrecognized command '");
-    Serial.print(token);
-    Serial.println("'");
   }
 }
 
@@ -311,8 +294,6 @@ void update_day_night(int box) {
     prevIsDay[box] = isDay;
     // set the LED color to white during the day
     if (isDay) {
-      // prompt the user of date and time
-      if (debugMode) Serial.println("RTC: It is now day time...");
       // manually set the RGB
       int argc = 5;
       char* boxStr = (box == 0) ? strdup("0") : strdup("1");
@@ -321,8 +302,6 @@ void update_day_night(int box) {
     }
     // set the LED color to red during the night
     else {
-      // prompt the user of date and time
-      if (debugMode) Serial.println("RTC: It is now night time...");
       // manually set the RGB
       int argc = 5;
       char* boxStr = (box == 0) ? strdup("0") : strdup("1");
@@ -334,16 +313,26 @@ void update_day_night(int box) {
   }
 }
 
-// echos the command back to the user via serial
-void echo_command_args(int argc, char* argv[]) {
+// echos the command back to the user
+char* echo_command_args(int argc, char* argv[]) {
 
-  for (int i = 0; i < argc; ++i) {
-    Serial.print(argv[i]);
-    if (i < argc - 1) {
-      Serial.print(" ");
-    }
+  // allocate memory for the echoed string
+  static char cmdName[22] = "";
+
+  // prepare the string to be passed to cmdName in SensorData
+  strcpy(cmdName, argv[0]);  // copy command name first
+
+  // concatenate arguments
+  for (int i = 1; i < argc && strlen(cmdName) + strlen(argv[i]) + 2 < sizeof(cmdName); ++i) {
+    strcat(cmdName, " ");      // append space
+    strcat(cmdName, argv[i]);  // append argument
   }
-  Serial.println();
+
+  // ensure null termination
+  cmdName[sizeof(cmdName) - 1] = '\0';
+
+  // return the command name and arguments
+  return cmdName;
 }
 
 // splits the time format "HHMM" into "HH" and "MM"
@@ -363,6 +352,71 @@ void split_time(const char* inputTime, char* hours, char* minutes) {
   minutes[2] = '\0';  // null terminate
 }
 
+void write_log(char* cmdArgsString) {
+
+  // packet to send over serial
+  SensorData pkt;
+
+  // date and time string buffer
+  DateTime now = rtc.now();
+  snprintf(pkt.date, sizeof(pkt.date), "%02d/%02d/%04d", now.month(), now.day(), now.year());
+  snprintf(pkt.time, sizeof(pkt.time), "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+
+  // get the LED information
+  CRGB color1 = leds[0][0];
+  pkt.r1 = color1.r;
+  pkt.g1 = color1.g;
+  pkt.b1 = color1.b;
+  CRGB color2 = leds[1][0];
+  pkt.r2 = color2.r;
+  pkt.g2 = color2.g;
+  pkt.b2 = color2.b;
+
+  // get the climate information
+  pkt.temp1 = dhtSensors[0].readTemperature();
+  pkt.temp2 = dhtSensors[1].readTemperature();
+  pkt.hum1 = dhtSensors[0].readHumidity();
+  pkt.hum2 = dhtSensors[1].readHumidity();
+
+  // send 0.0 float instead of nan
+  if (isnan(pkt.temp1)) pkt.temp1 = 0.0;
+  if (isnan(pkt.temp2)) pkt.temp2 = 0.0;
+
+  // echo the command we executed
+  strncpy(pkt.cmdName, cmdArgsString, sizeof(pkt.cmdName));
+
+  // send the log data packet over serial
+  Serial.write(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
+
+  // print the log data to the serial monitor
+  // Serial.print("Date: ");
+  // Serial.print(pkt.date);
+  // Serial.print(" | Time: ");
+  // Serial.print(pkt.time);
+  // Serial.print(" | LED 1 (R,G,B): (");
+  // Serial.print(pkt.r1);
+  // Serial.print(",");
+  // Serial.print(pkt.g1);
+  // Serial.print(",");
+  // Serial.print(pkt.b1);
+  // Serial.print(") | LED 2 (R,G,B): (");
+  // Serial.print(pkt.r2);
+  // Serial.print(",");
+  // Serial.print(pkt.g2);
+  // Serial.print(",");
+  // Serial.print(pkt.b2);
+  // Serial.print(") | Temp 1: ");
+  // Serial.print(pkt.temp1);
+  // Serial.print(" | Temp 2: ");
+  // Serial.print(pkt.temp2);
+  // Serial.print(" | Humidity 1: ");
+  // Serial.print(pkt.hum1);
+  // Serial.print(" | Humidity 2: ");
+  // Serial.print(pkt.hum2);
+  // Serial.print(" | Command: ");
+  // Serial.println(pkt.cmdName);
+}
+
 
 
 /******************************************************************************************
@@ -373,59 +427,7 @@ void split_time(const char* inputTime, char* hours, char* minutes) {
 
 // send log entry to serial when requested
 void Command_LOG_REQ(int argc, char* argv[]) {
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 0");
-
-  // write buffer for formatting strings
-  char logStr[128];
-
-  // date and time string buffer
-  DateTime now = rtc.now();
-  char date[11];
-  char time[9];
-  sprintf(date, "%02d/%02d/%04d", now.month(), now.day(), now.year());
-  sprintf(time, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 1");
-
-  // get the LED information
-  CRGB color1 = leds[0][0];
-  uint8_t r1 = color1.r;
-  uint8_t g1 = color1.g;
-  uint8_t b1 = color1.b;
-  CRGB color2 = leds[1][0];
-  uint8_t r2 = color2.r;
-  uint8_t g2 = color2.g;
-  uint8_t b2 = color2.b;
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 2");
-
-  // get the climate information
-  float hum1 = dhtSensors[0].readHumidity();
-  float hum2 = dhtSensors[1].readHumidity();
-  float temp1 = dhtSensors[0].readTemperature();
-  float temp2 = dhtSensors[1].readTemperature();
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 3");
-
-  // sprintf cannot handle floats in avr gcc compiler (Arduino compiler) so convert to string
-  char hum1Str[7];
-  char hum2Str[7];
-  char temp1Str[7];
-  char temp2Str[7];
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 4");
-
-  dtostrf(hum1, 6, 2, hum1Str);
-  dtostrf(temp1, 6, 2, temp1Str);
-  dtostrf(hum2, 6, 2, hum2Str);
-  dtostrf(temp2, 6, 2, temp2Str);
-
-  if (debugMode) Serial.println("Made it to Command_LOG_REQ 5");
-
-  // format the information into a string using sprintf
-  sprintf(logStr, "%s  | %s | (%03d, %03d, %03d) | (%03d, %03d, %03d) |%s%%     |%s%%     |%s\xB0""C       |%s\xB0""C       | ", date, time, r1, g1, b1, r2, g2, b2, hum1Str, hum2Str, temp1Str, temp2Str);
-  Serial.print(logStr);
+  // just needs to be called successfully to send unprompted log entry
 }
 
 // turn on the auto day and night cycle checking
@@ -449,29 +451,18 @@ void Command_RTC_BEG(int argc, char* argv[]) {
   split_time(stopStr, stopHours, stopMinutes);
 
   // convert hours and minutes to total minutes integer
-  dayStart[box] = atoi(startHours) * 60 + atoi(startMinutes);
-  dayStop[box] = atoi(stopHours) * 60 + atoi(stopMinutes);
+
+  
+  // convert hours and minutes to total minutes integer
+  int newDayStart = atoi(startHours) * 60 + atoi(startMinutes);
+  int newDayStop = atoi(stopHours) * 60 + atoi(stopMinutes);
+
+  // set the globals if good
+  dayStart[box] = newDayStart;
+  dayStop[box] = newDayStop;
 
   // tell the main loop to start checking the time
   startCheck[box] = true;
-
-  // add a log entry with the command we executed
-  Command_LOG_REQ();
-  echo_command_args(argc, argv);
-
-  // ack the start and stop times
-  if (debugMode) {
-    Serial.print("RTC: setting day and night times for box ");
-    Serial.println(box + 1);
-    Serial.print("RTC: white LED (day) starts at ");
-    Serial.print(startHours);
-    Serial.print(":");
-    Serial.println(startMinutes);
-    Serial.print("RTC: red LED (night) starts at ");
-    Serial.print(stopHours);
-    Serial.print(":");
-    Serial.println(stopMinutes);
-  }
 }
 
 // turn off the auto day and night cycle checking
@@ -486,27 +477,13 @@ void Command_RTC_END(int argc, char* argv[]) {
   // reset our first iteration flag for next time
   firstCheck[box] = true;
 
-  // // turn off the LED
-  // for (int i = 0; i < NUM_LEDS; ++i) {
-  //   leds[box][i].setRGB(0, 0, 0);
-  // }
-  // FastLED.show();
-
-  // turn off the LED
-  int _argc = 5;
-  char* boxStr = (box == 0) ? strdup("0") : strdup("1");
-  char* _argv[_argc] = { "LED_RGB", boxStr, "0", "0", "0" };
-  Command_LED_RGB(_argc, _argv);
-
-  // add a log entry with the command we executed
-  Command_LOG_REQ();
-  echo_command_args(argc, argv);
-
-  // prompt the user
-  if (debugMode) {
-    Serial.print("RTC: turned off day and night cycles for box ");
-    Serial.println(box + 1);
+  // set LED to black
+  for (int i = 0; i < NUM_LEDS; ++i) {
+    leds[box][i].setRGB(0, 0, 0);
   }
+
+  // update all of the changes we just made
+  FastLED.show();
 }
 
 // change RGB values of LED
@@ -527,23 +504,6 @@ void Command_LED_RGB(int argc, char* argv[]) {
 
   // update all of the changes we just made
   FastLED.show();
-
-  // add a log entry with the command we executed
-  Command_LOG_REQ();
-  echo_command_args(argc, argv);
-
-  // prompt the user
-  if (debugMode) {
-    Serial.print("LED: strip ");
-    Serial.print(box + 1);
-    Serial.print(" color set to RGB values (");
-    Serial.print(R);
-    Serial.print(", ");
-    Serial.print(G);
-    Serial.print(", ");
-    Serial.print(B);
-    Serial.println(")");
-  }
 }
 
 // command function to set brightness for a specific LED strip
@@ -555,16 +515,6 @@ void Command_LED_INT(int argc, char* argv[]) {
 
   // update all of the changes we just made
   FastLED.show();
-
-  // add a log entry with the command we executed
-  Command_LOG_REQ();
-  echo_command_args(argc, argv);
-
-  // prompt the user
-  if (debugMode) {
-    Serial.print("LED: brightness set to ");
-    Serial.println(brightnessVal);
-  }
 }
 
 // turn off the LED
@@ -580,22 +530,4 @@ void Command_LED_OFF(int argc, char* argv[]) {
 
   // update all of the changes we just made
   FastLED.show();
-
-  // add a log entry with the command we executed
-  Command_LOG_REQ();
-  echo_command_args(argc, argv);
-
-  // prompt the user
-  if (debugMode) {
-    Serial.print("LED: turned off strip ");
-    Serial.println(box + 1);
-  }
-}
-
-// resets the RTC clock time to last flash
-void Command_RTC_RST(int argc, char* argv[]) {
-  
-  // prompt the user, then reset the date and time
-  if (debugMode) Serial.println("RTC: resetting RTC time");
-  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
