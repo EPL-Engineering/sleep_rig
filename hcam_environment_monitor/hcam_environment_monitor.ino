@@ -3,7 +3,6 @@
 #include <FastLED.h>
 #include <RTClib.h>
 #include <Wire.h>
-#include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <stdio.h>
 #include <string.h>
@@ -154,6 +153,7 @@ void setup(void) {
 
   // initialize the RTC
   if (!rtc.begin()) while (true);
+  // rtc.begin();
 
   // check if the RTC lost power
   if (!rtc.initialized() || rtc.lostPower()) {

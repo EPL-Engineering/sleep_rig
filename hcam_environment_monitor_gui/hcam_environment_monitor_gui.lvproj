@@ -80,7 +80,7 @@
 				<Property Name="Bld_localDestDirType" Type="Str">relativeToCommon</Property>
 				<Property Name="Bld_modifyLibraryFile" Type="Bool">true</Property>
 				<Property Name="Bld_previewCacheID" Type="Str">{05E2675A-3C6A-4109-A32C-A4DB3C4EEDCC}</Property>
-				<Property Name="Bld_version.build" Type="Int">2</Property>
+				<Property Name="Bld_version.build" Type="Int">3</Property>
 				<Property Name="Bld_version.major" Type="Int">1</Property>
 				<Property Name="Destination[0].destName" Type="Str">EnvironmentMonitor.exe</Property>
 				<Property Name="Destination[0].path" Type="Path">../EnvironmentMonitor.exe</Property>
@@ -89,7 +89,7 @@
 				<Property Name="Destination[1].destName" Type="Str">Support Directory</Property>
 				<Property Name="Destination[1].path" Type="Path">../data</Property>
 				<Property Name="DestinationCount" Type="Int">2</Property>
-				<Property Name="Source[0].itemID" Type="Str">{DBBF1E2A-AF60-48B8-A6FF-5860C47B71D8}</Property>
+				<Property Name="Source[0].itemID" Type="Str">{CC896C5D-39B4-4A46-808B-94CDE94D4375}</Property>
 				<Property Name="Source[0].type" Type="Str">Container</Property>
 				<Property Name="Source[1].destinationIndex" Type="Int">0</Property>
 				<Property Name="Source[1].itemID" Type="Ref">/My Computer/LV Source/hcam_environment_monitor.vi</Property>
