@@ -109,7 +109,7 @@ typedef struct {
   float temp2;
   float hum1;
   float hum2;
-  char cmdName[22];
+  char cmdName[86]; // LED_RGB 0 255 255 255 uses 23 bytes max (largest command size)
 } SensorData;
 
 
@@ -267,7 +267,7 @@ void process_message(void) {
         // execute the command and pass any arguments
         cmdTable[i].commandFunction(argc, argv);
         // convert the command and arguments to string
-        char cmdName[22];
+        char cmdName[86];
         strcpy(cmdName, echo_command_args(argc, argv));
         // write log to serial line
         write_log(cmdName);
@@ -317,7 +317,7 @@ void update_day_night(int box) {
 char* echo_command_args(int argc, char* argv[]) {
 
   // allocate memory for the echoed string
-  static char cmdName[22] = "";
+  static char cmdName[86] = "";
 
   // prepare the string to be passed to cmdName in SensorData
   strcpy(cmdName, argv[0]);  // copy command name first
