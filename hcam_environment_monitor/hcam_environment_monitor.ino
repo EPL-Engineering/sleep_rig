@@ -99,7 +99,7 @@ CmdStruct cmdTable[NUM_CMDS] = {
 
 };
 
-// struct to send sensor data packet over serial
+// struct to send sensor data packet over serial 128 bytes
 typedef struct {
   char date[11];
   char time[9];
@@ -286,7 +286,16 @@ void update_day_night(int box) {
   int currentMinute = now.hour() * 60 + now.minute();
 
   // determine if it's day or night
-  bool isDay = (currentMinute >= dayStart[box] && currentMinute < dayStop[box]);
+  bool isDay;
+
+  // check if cycle is reversed (stop comes before start)
+  if (dayStop[box] < dayStart[box]) {
+    isDay = (currentMinute >= dayStop[box] && currentMinute < dayStart[box]);
+  }
+  // check if cycle is normal (start comes before stop time)
+  else {
+    isDay = (currentMinute >= dayStart[box] && currentMinute < dayStop[box]);
+  }
 
   // only prompt user if we changed from the last day check
   if (firstCheck[box] || isDay != prevIsDay[box]) {

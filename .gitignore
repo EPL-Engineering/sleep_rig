@@ -1,2 +1,4 @@
 /hcam_environment_monitor_gui/*.aliases
 /logs
+/hcam_environment_monitor_gui/logs
+/genie_nano
