@@ -290,7 +290,7 @@ void update_day_night(int box) {
 
   // check if cycle is reversed (stop comes before start)
   if (dayStop[box] < dayStart[box]) {
-    isDay = (currentMinute >= dayStop[box] && currentMinute < dayStart[box]);
+    isDay = !(currentMinute >= dayStop[box] && currentMinute < dayStart[box]);
   }
   // check if cycle is normal (start comes before stop time)
   else {
